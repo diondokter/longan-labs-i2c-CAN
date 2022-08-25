@@ -99,6 +99,17 @@ impl<I: I2c> LonganLabsI2CCan<I> {
         }))
     }
 
+    /// Keep polling until a CAN frame is received
+    pub async fn receive_frame(&mut self) -> Result<CanFrame, I::Error> {
+        loop {
+            if let Some(frame) = self.try_receive_frame().await? {
+                return Ok(frame);
+            }
+        }
+    }
+
+    // TODO: Create functions for the filters and masks
+
     fn make_checksum(data: &[u8]) -> u8 {
         let mut sum: u32 = data.iter().map(|byte| *byte as u32).sum();
 
