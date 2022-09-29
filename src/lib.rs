@@ -35,9 +35,8 @@ impl<I: I2c> LonganLabsI2CCan<I> {
     /// the new CAN frame will overwrite the ones that were not read in time.
     pub async fn available_frames(&mut self) -> Result<u8, I::Error> {
         let mut result = [0; 1];
-        self.interface
-            .write_read(self.address, &[0x02], &mut result)
-            .await?;
+        self.interface.write(self.address, &[0x02]).await?;
+        self.interface.read(self.address, &mut result).await?;
         Ok(result[0])
     }
 
@@ -71,9 +70,8 @@ impl<I: I2c> LonganLabsI2CCan<I> {
 
         let mut buffer = [0; 16];
 
-        self.interface
-            .write_read(self.address, &[0x40], &mut buffer)
-            .await?;
+        self.interface.write(self.address, &[0x40]).await?;
+        self.interface.read(self.address, &mut buffer).await?;
 
         // Check the checksum
         let checksum = Self::make_checksum(&buffer[0..15]);
