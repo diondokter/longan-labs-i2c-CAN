@@ -23,7 +23,7 @@ impl<I: I2c> LonganLabsI2CCan<I> {
     }
 
     /// Sets the i2c address
-    pub async fn set_addres(&mut self, value: u8) -> Result<(), I::Error> {
+    pub async fn set_addres(&mut self, value: u8) -> Result<(), Error<I::Error>> {
         self.interface.write(self.address, &[0x01, value]).await?;
         self.address = value;
         Ok(())
@@ -33,7 +33,7 @@ impl<I: I2c> LonganLabsI2CCan<I> {
     /// The number of CAN Frames currently stored in the device can be read with this function.
     /// If the number of CAN frames stored in the device exceeds 16,
     /// the new CAN frame will overwrite the ones that were not read in time.
-    pub async fn available_frames(&mut self) -> Result<u8, I::Error> {
+    pub async fn available_frames(&mut self) -> Result<u8, Error<I::Error>> {
         let mut result = [0; 1];
         self.interface.write(self.address, &[0x02]).await?;
         self.interface.read(self.address, &mut result).await?;
@@ -41,14 +41,16 @@ impl<I: I2c> LonganLabsI2CCan<I> {
     }
 
     /// Set the baud rate of the CAN bus
-    pub async fn set_can_baud_rate(&mut self, value: BaudRate) -> Result<(), I::Error> {
+    pub async fn set_can_baud_rate(&mut self, value: BaudRate) -> Result<(), Error<I::Error>> {
         self.interface
             .write(self.address, &[0x03, value as u8])
-            .await
+            .await?;
+
+        Ok(())
     }
 
     /// Send a CAN frame on the bus
-    pub async fn send_frame(&mut self, frame: CanFrame) -> Result<(), I::Error> {
+    pub async fn send_frame(&mut self, frame: CanFrame) -> Result<(), Error<I::Error>> {
         let mut buffer = [0; 17];
 
         buffer[0] = 0x30; // Register address
@@ -59,11 +61,13 @@ impl<I: I2c> LonganLabsI2CCan<I> {
         buffer[8..][..frame.data.len()].copy_from_slice(&frame.data);
         buffer[16] = Self::make_checksum(&buffer[1..16]);
 
-        self.interface.write(self.address, &buffer).await
+        self.interface.write(self.address, &buffer).await?;
+
+        Ok(())
     }
 
     /// Get a CAN frame if one is available
-    pub async fn try_receive_frame(&mut self) -> Result<Option<CanFrame>, I::Error> {
+    pub async fn try_receive_frame(&mut self) -> Result<Option<CanFrame>, Error<I::Error>> {
         if self.available_frames().await? == 0 {
             return Ok(None);
         }
@@ -77,7 +81,7 @@ impl<I: I2c> LonganLabsI2CCan<I> {
         let checksum = Self::make_checksum(&buffer[0..15]);
 
         if buffer[15] != checksum {
-            return Ok(None);
+            return Err(Error::InvalidChecksum);
         }
 
         let id = u32::from_be_bytes(buffer[0..4].try_into().unwrap());
@@ -86,7 +90,7 @@ impl<I: I2c> LonganLabsI2CCan<I> {
         let data_len = buffer[6] as usize;
 
         if data_len > 8 {
-            return Ok(None);
+            return Err(Error::DataTooLarge);
         }
 
         let data = ArrayVec::try_from(&buffer[7..][..data_len]).unwrap();
@@ -100,7 +104,7 @@ impl<I: I2c> LonganLabsI2CCan<I> {
     }
 
     /// Keep polling until a CAN frame is received
-    pub async fn receive_frame(&mut self) -> Result<CanFrame, I::Error> {
+    pub async fn receive_frame(&mut self) -> Result<CanFrame, Error<I::Error>> {
         loop {
             if let Some(frame) = self.try_receive_frame().await? {
                 return Ok(frame);
@@ -169,4 +173,17 @@ pub enum BaudRate {
     K666 = 17,
     /// 1000 kbps (1 mbps)
     K1000 = 18,
+}
+
+#[derive(Debug)]
+pub enum Error<IE: embedded_hal_async::i2c::Error> {
+    InterfaceError(IE),
+    InvalidChecksum,
+    DataTooLarge
+}
+
+impl<IE: embedded_hal_async::i2c::Error> From<IE> for Error<IE> {
+    fn from(e: IE) -> Self {
+        Self::InterfaceError(e)
+    }
 }
